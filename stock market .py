@@ -1,10 +1,48 @@
+import sys
+import subprocess
+import importlib
+import os
+
+REQUIRED = ["yfinance", "pandas", "numpy", "plotly", "streamlit"]
+
+def try_import(name):
+    try:
+        return importlib.import_module(name)
+    except Exception:
+        return None
+
+def ensure_packages(packages):
+    missing = [p for p in packages if try_import(p) is None]
+    if not missing:
+        return True
+    print(f"Missing packages detected: {missing}")
+    python = sys.executable
+    try:
+        print(f"Attempting to install: {' '.join(missing)} ... (this may take a minute)")
+        subprocess.check_call([python, "-m", "pip", "install", *missing])
+    except subprocess.CalledProcessError:
+        print("Automatic installation failed. Please run the following command manually in your terminal:")
+        print(f"{python} -m pip install {' '.join(missing)}")
+        return False
+    # try importing again
+    still_missing = [p for p in packages if try_import(p) is None]
+    if still_missing:
+        print("Some packages are still missing after install:", still_missing)
+        print("Please install them manually and re-run the app.")
+        return False
+    return True
+
+if not ensure_packages(REQUIRED):
+    # Stop here if packages couldn't be installed
+    sys.exit(1)
+
+# safe to import
 import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 from datetime import date, datetime, timedelta
-import io
 
 # optional sentiment
 try:
@@ -12,6 +50,13 @@ try:
     TEXTBLOB_AVAILABLE = True
 except Exception:
     TEXTBLOB_AVAILABLE = False
+
+# Warn if filename contains spaces (filename issue user had earlier)
+script_name = os.path.basename(__file__)
+if " " in script_name:
+    st = None
+    print("WARNING: Your script filename contains spaces. Rename the file to remove spaces, e.g. stock_market_app.py")
+    # continue anyway
 
 # -------------------- Page config --------------------
 st.set_page_config(page_title='MarketMate — Dark Dashboard', layout='wide', initial_sidebar_state='expanded')
@@ -33,8 +78,6 @@ DARK_CSS = r"""
 .css-1d391kg {background-color: #070708 !important;}
 /* Card backgrounds */
 .css-1v3fvcr {background-color: #0b0c10 !important;}
-/* Widget labels */
-.st-bf {color: #c9d1d9}
 /* Buttons */
 .stButton>button{
   background-color:#1e293b;
@@ -42,19 +85,11 @@ DARK_CSS = r"""
   border-radius: 8px;
 }
 .stDownloadButton>button{background-color:#0b64a0}
-/* Metrics */
-.card-title, .card-value{color:#e6eef8}
-/* Small print */
-.small {color:#9aa4b2}
-
-/* Make tables have dark background */
+/* Tables */
 .stDataFrame, .stTable td, .stTable th {background-color: #071018; color: #e6eef8}
-
-/* Improve spacing */
-.css-1lcbmhc {padding: 1rem 1rem 1rem 1rem}
+.small {color:#9aa4b2}
 </style>
 """
-
 st.markdown(DARK_CSS, unsafe_allow_html=True)
 
 # -------------------- Helpers --------------------
@@ -76,13 +111,11 @@ def get_info(ticker: str):
     except Exception:
         return {}
 
-
 def sma(series, window):
     return series.rolling(window=window).mean()
 
 def ema(series, span):
     return series.ewm(span=span, adjust=False).mean()
-
 
 def plot_price(df, ticker, indicators, template='plotly_dark'):
     fig = go.Figure()
@@ -96,19 +129,16 @@ def plot_price(df, ticker, indicators, template='plotly_dark'):
     fig.update_layout(margin=dict(l=10,r=10,t=40,b=10), height=420, xaxis_title='Date', yaxis_title='Price', template=template, legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1))
     return fig
 
-
 def plot_volume(df, ticker, template='plotly_dark'):
     fig = go.Figure()
     fig.add_trace(go.Bar(x=df['date'], y=df['volume'], name='Volume'))
     fig.update_layout(margin=dict(l=10,r=10,t=10,b=10), height=220, xaxis_title='Date', yaxis_title='Volume', template=template)
     return fig
 
-
 def plot_candlestick(df, ticker, template='plotly_dark'):
     fig = go.Figure(data=[go.Candlestick(x=df['date'], open=df['open'], high=df['high'], low=df['low'], close=df['close'], name='Candlestick')])
     fig.update_layout(margin=dict(l=10,r=10,t=40,b=10), height=520, template=template)
     return fig
-
 
 def sentiment_text(text: str):
     if not TEXTBLOB_AVAILABLE:
@@ -188,14 +218,12 @@ with action_col:
     if st.button('Search'):
         pass
 
-# We allow Search by either pressing Search or if ticker is prefilled
 if ticker:
     df = fetch_ticker_data(ticker, start_date.isoformat(), (end_date + timedelta(days=1)).isoformat(), interval)
     if df.empty:
         st.error(f'No data found for {ticker}. Check the symbol and interval.')
     else:
         info = get_info(ticker)
-        # Top metrics
         last_close = df['close'].iloc[-1]
         prev_close = info.get('previousClose', None)
         market_cap = info.get('marketCap', 'N/A')
@@ -213,7 +241,6 @@ if ticker:
         mcol3.metric('Market Cap', market_cap)
         mcol4.metric('52W H / L', f"{high_52} / {low_52}")
 
-        # Indicators parse
         indicators = {'SMA': [], 'EMA': []}
         try:
             if show_sma:
@@ -223,7 +250,6 @@ if ticker:
         except Exception:
             indicators = {'SMA': [], 'EMA': []}
 
-        # Charts
         st.markdown('### Price chart')
         st.plotly_chart(plot_price(df, ticker, indicators), use_container_width=True)
 
@@ -233,7 +259,6 @@ if ticker:
         if st.checkbox('Show candlestick chart'):
             st.plotly_chart(plot_candlestick(df, ticker), use_container_width=True)
 
-        # Compare
         if compare_ticker.strip():
             compare = compare_ticker.strip().upper()
             df2 = fetch_ticker_data(compare, start_date.isoformat(), (end_date + timedelta(days=1)).isoformat(), interval)
@@ -247,7 +272,6 @@ if ticker:
                 fig.update_layout(title='Comparison: Close prices', template='plotly_dark', height=420)
                 st.plotly_chart(fig, use_container_width=True)
 
-        # Quick analytics
         st.markdown('### Quick analytics')
         returns = df['close'].pct_change().dropna()
         c1, c2, c3 = st.columns(3)
@@ -256,7 +280,6 @@ if ticker:
         c2.metric('Volatility (Ann.)', f"{returns.std()*np.sqrt(252)*100:.2f}%")
         c3.metric('Avg Volume', f"{int(df['volume'].mean())}")
 
-        # News & sentiment
         st.markdown('---')
         st.subheader('News & Sentiment')
         t = yf.Ticker(ticker)
@@ -276,7 +299,6 @@ if ticker:
         else:
             st.write('No news fetched. To enable richer news, integrate NewsAPI / Finnhub.')
 
-        # Portfolio Simulator
         st.markdown('---')
         st.subheader('Portfolio Simulator (session-only)')
         if 'trades' not in st.session_state:
@@ -299,18 +321,15 @@ if ticker:
             trades_df = pd.DataFrame(st.session_state['trades'])
             st.dataframe(trades_df)
 
-        # Data download
         csv = df.to_csv(index=False).encode('utf-8')
         st.download_button('Download historical data (CSV)', csv, file_name=f'{ticker}_{start_date}_{end_date}.csv')
 
-        # Alerts check
         if st.session_state['alerts']:
             for a in st.session_state['alerts']:
                 if a['symbol'] == ticker and df['close'].iloc[-1] >= a['price']:
                     st.balloons()
                     st.warning(f"Alert: {ticker} >= {a['price']} (now {df['close'].iloc[-1]:.2f})")
 
-# -------------------- Footer / Feature ideas --------------------
 st.markdown('---')
 st.header('Next steps & Pro features')
 st.write('- Add user authentication + persistent DB (Supabase, Firebase, PostgreSQL)')
@@ -320,5 +339,4 @@ st.write('- Options chain viewer and Greeks')
 st.write('- Export printable PDF reports and chart snapshots')
 
 st.info('To deploy: push this file and a requirements.txt to GitHub, then connect the repo to Streamlit Community Cloud.')
-
 # End of file
