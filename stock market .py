@@ -16,60 +16,43 @@ st.set_page_config(
 )
 
 # ==============================
-# Professional Theme (Blue + Dark Mode)
+# Theme: Green + Blue (Professional)
 # ==============================
 st.markdown("""
     <style>
-        /* Main background */
+        /* Background */
         [data-testid="stAppViewContainer"] {
-            background: linear-gradient(135deg, #031a35 0%, #07305b 100%);
+            background: linear-gradient(135deg, #0f2b1d 0%, #0b3f60 100%);
             color: #EAF6F4;
         }
-
-        /* Sidebar styling */
         [data-testid="stSidebar"] {
-            background: linear-gradient(180deg, #061b33 0%, #082c54 100%);
+            background: linear-gradient(180deg, #0a2c1e 0%, #0c3c54 100%);
             color: #EAF6F4;
         }
-
-        /* Header text color fix */
         h1, h2, h3, h4 {
-            color: #5cc9ff !important;
+            color: #3cd28c !important;
             font-weight: 700;
         }
-
-        /* Metric styling */
-        [data-testid="stMetricValue"] {
-            color: #5cc9ff !important;
-            font-weight: 800;
-        }
-        [data-testid="stMetricLabel"] {
-            color: #cce7ff !important;
-        }
-
-        /* Buttons */
         .stButton>button {
-            background-color: #58d1f5 !important;
-            color: #041427 !important;
+            background-color: #3cd28c !important;
+            color: #0f2b1d !important;
             border-radius: 8px;
             font-weight: 700;
             transition: 0.3s;
         }
         .stButton>button:hover {
-            background-color: #89e0ff !important;
-            transform: scale(1.05);
+            background-color: #5decab !important;
+            transform: scale(1.03);
         }
-
-        /* Card style */
         .card {
-            background: rgba(255,255,255,0.07);
+            background: rgba(255,255,255,0.05);
             border-radius: 12px;
             padding: 18px;
             margin-bottom: 16px;
-            box-shadow: 0 8px 20px rgba(0,0,0,0.4);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.35);
         }
-
-        /* Scrollable news box */
+        [data-testid="stMetricValue"] { color: #3cd28c !important; font-weight: 700; }
+        [data-testid="stMetricLabel"] { color: #EAF6F4 !important; }
         .scroll-box {
             max-height: 320px;
             overflow-y: auto;
@@ -79,25 +62,26 @@ st.markdown("""
             width: 6px;
         }
         .scroll-box::-webkit-scrollbar-thumb {
-            background-color: #58d1f5;
+            background-color: #3cd28c;
             border-radius: 3px;
         }
     </style>
 """, unsafe_allow_html=True)
 
 # ==============================
-# App Header
+# Header
 # ==============================
 st.title("📈 Indian Market Dashboard")
 st.write("Live Market Overview • Stock Analysis • Top Movers • Business News • Sentiment Insights")
 
 # ==============================
-# NewsAPI Key
+# Primary & Backup News API Keys
 # ==============================
-API_KEY = "a9b91dc9740c491ab00c7b79d40486e4"
+PRIMARY_NEWS_API_KEY = "a9b91dc9740c491ab00c7b79d40486e4"
+BACKUP_NEWS_API_KEY = "YOUR_NEWDATA_IO_KEY"  # replace with your NewsData.io key or another backup
 
 # ==============================
-# Data Fetch Functions
+# Helper functions
 # ==============================
 @st.cache_data(ttl=1800)
 def fetch_nse_data():
@@ -116,13 +100,36 @@ def fetch_nse_data():
 
 @st.cache_data(ttl=300)
 def fetch_news(category="business", num_articles=8):
-    url = f"https://newsapi.org/v2/top-headlines?country=in&category={category}&apiKey={API_KEY}&pageSize={num_articles}"
+    # Try primary key
+    url1 = f"https://newsapi.org/v2/top-headlines?country=in&category={category}&apiKey={PRIMARY_NEWS_API_KEY}&pageSize={num_articles}"
     try:
-        res = requests.get(url, timeout=10)
-        res.raise_for_status()
-        return res.json().get("articles", [])
+        r1 = requests.get(url1, timeout=10)
+        if r1.status_code == 200:
+            return r1.json().get("articles", [])
     except Exception:
-        return []
+        pass
+    # Try backup key
+    if BACKUP_NEWS_API_KEY:
+        url2 = f"https://newsdata.io/api/1/news?country=in&category={category}&apikey={BACKUP_NEWS_API_KEY}&page_size={num_articles}"
+        try:
+            r2 = requests.get(url2, timeout=10)
+            if r2.status_code == 200:
+                result = r2.json().get("results", [])
+                # Normalize to our structure
+                articles = []
+                for item in result:
+                    articles.append({
+                        "title": item.get("title"),
+                        "url": item.get("link"),
+                        "urlToImage": item.get("image_url"),
+                        "source": {"name": item.get("source_id")},
+                        "publishedAt": item.get("pubDate"),
+                        "description": item.get("description")
+                    })
+                return articles
+        except Exception:
+            pass
+    return []
 
 def get_stock_data(symbol, period="1mo"):
     try:
@@ -132,12 +139,15 @@ def get_stock_data(symbol, period="1mo"):
         return pd.DataFrame()
 
 def sentiment_label(text):
-    score = TextBlob(text).sentiment.polarity
-    if score > 0.1:
-        return "🟢 Positive"
-    elif score < -0.1:
-        return "🔴 Negative"
-    else:
+    try:
+        score = TextBlob(text).sentiment.polarity
+        if score > 0.1:
+            return "🟢 Positive"
+        elif score < -0.1:
+            return "🔴 Negative"
+        else:
+            return "⚪ Neutral"
+    except Exception:
         return "⚪ Neutral"
 
 # ==============================
@@ -153,7 +163,7 @@ page = st.sidebar.radio(
         "📰 Latest News",
         "💬 Sentiment",
         "ℹ️ About"
-    ),
+    )
 )
 
 # ==============================
@@ -162,38 +172,40 @@ page = st.sidebar.radio(
 if page == "🏠 Dashboard":
     st.header("📊 Indian Market Overview")
 
-    col1, col2, col3 = st.columns([1.2, 1.2, 1.6])
+    col1, col2, col3 = st.columns([1.2,1.2,1.6])
 
     nifty = get_stock_data("^NSEI", "1mo")
     sensex = get_stock_data("^BSESN", "1mo")
 
-    # NIFTY
+    # NIFTY card
     with col1:
         st.markdown('<div class="card">', unsafe_allow_html=True)
         st.subheader("📊 NIFTY 50")
         if not nifty.empty:
-            start, end = nifty["Close"].iloc[0], nifty["Close"].iloc[-1]
-            growth = ((end - start) / start) * 100
+            start = nifty["Close"].iloc[0]
+            end = nifty["Close"].iloc[-1]
+            growth = ((end-start)/start)*100
             st.metric("Value", f"₹{end:,.2f}", delta=f"{growth:.2f}%")
             st.line_chart(nifty["Close"], height=160)
         else:
             st.warning("NIFTY data unavailable.")
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # SENSEX
+    # SENSEX card
     with col2:
         st.markdown('<div class="card">', unsafe_allow_html=True)
         st.subheader("📈 SENSEX")
         if not sensex.empty:
-            start, end = sensex["Close"].iloc[0], sensex["Close"].iloc[-1]
-            growth = ((end - start) / start) * 100
+            start = sensex["Close"].iloc[0]
+            end = sensex["Close"].iloc[-1]
+            growth = ((end-start)/start)*100
             st.metric("Value", f"₹{end:,.2f}", delta=f"{growth:.2f}%")
             st.line_chart(sensex["Close"], height=160)
         else:
             st.warning("SENSEX data unavailable.")
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # Latest News Scrollable
+    # News panel
     with col3:
         st.markdown('<div class="card">', unsafe_allow_html=True)
         st.subheader("📰 Latest Business Headlines")
@@ -202,12 +214,12 @@ if page == "🏠 Dashboard":
             st.markdown('<div class="scroll-box">', unsafe_allow_html=True)
             for n in news:
                 title = n.get("title", "")
-                source = n.get("source", {}).get("name", "")
-                st.markdown(f"• **{title}**  \n🗞️ {source}")
+                src = n.get("source", {}).get("name", "")
+                st.markdown(f"• **{title}**  \n🗞️ {src}")
                 st.markdown("---")
             st.markdown('</div>', unsafe_allow_html=True)
         else:
-            st.info("No latest news found.")
+            st.info("News currently unavailable.")
         st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown("---")
@@ -220,25 +232,28 @@ if page == "🏠 Dashboard":
         st.info("NSE data currently unavailable.")
 
 # ==============================
-# Other Pages stay the same
+# Stock Search Page
 # ==============================
-
 elif page == "🔎 Stock Search":
     st.header("🔍 Stock Search & Chart")
-    symbol = st.text_input("Enter NSE symbol (e.g., RELIANCE.NS, TCS.NS)", "RELIANCE.NS")
-    period = st.selectbox("Select timeframe", ["5d", "1mo", "3mo", "6mo", "1y"], index=1)
+    symbol = st.text_input("Enter NSE symbol (e.g., RELIANCE.NS)", "RELIANCE.NS")
+    period = st.selectbox("Select timeframe", ["5d","1mo","3mo","6mo","1y"], index=1)
 
     if st.button("Show Data"):
         data = get_stock_data(symbol, period)
         if data.empty:
             st.error("Data not found. Try another stock symbol.")
         else:
-            start, end = data["Close"].iloc[0], data["Close"].iloc[-1]
-            growth = ((end - start) / start) * 100
+            start = data["Close"].iloc[0]
+            end = data["Close"].iloc[-1]
+            growth = ((end-start)/start)*100
             st.metric("Growth", f"{growth:.2f}%")
             st.line_chart(data["Close"], height=350)
             st.dataframe(data.tail(), use_container_width=True)
 
+# ==============================
+# Top Movers Page
+# ==============================
 elif page == "🚀 Top Movers":
     st.header("🚀 Top Gainers & Losers (NSE)")
     df = fetch_nse_data()
@@ -257,43 +272,61 @@ elif page == "🚀 Top Movers":
             st.subheader("📉 Top Losers")
             st.dataframe(losers.reset_index(drop=True), use_container_width=True)
 
+# ==============================
+# Latest News Page
+# ==============================
 elif page == "📰 Latest News":
     st.header("📰 Latest Business News")
     num = st.slider("Number of Articles", 3, 12, 6)
     if st.button("Load News"):
         articles = fetch_news("business", num)
         if not articles:
-            st.warning("No news available (API limit).")
-        for i, art in enumerate(articles, start=1):
-            st.markdown(f"### {i}. [{art.get('title')}]({art.get('url')})")
-            if art.get("urlToImage"):
-                st.image(art["urlToImage"], use_column_width=True)
-            st.caption(f"{art.get('source',{}).get('name','')} | {art.get('publishedAt','')[:19].replace('T',' ')}")
-            st.write(art.get("description", ""))
-            st.write("---")
+            st.warning("News unavailable (API might be blocked).")
+        else:
+            for i, art in enumerate(articles, start=1):
+                title = art.get("title", "No title")
+                url = art.get("url", "#")
+                img = art.get("urlToImage")
+                src = art.get("source", {}).get("name", "")
+                date = art.get("publishedAt", "")[:19].replace("T", " ")
+                desc = art.get("description", "")
+                st.markdown(f"### {i}. [{title}]({url})")
+                if img:
+                    st.image(img, use_column_width=True)
+                st.caption(f"{src} | {date}")
+                st.write(desc)
+                st.write("---")
 
+# ==============================
+# Sentiment Page
+# ==============================
 elif page == "💬 Sentiment":
     st.header("💬 Business News Sentiment")
     if st.button("Analyze"):
-        articles = fetch_news("business", 8)
-        if not articles:
+        arts = fetch_news("business", 8)
+        if not arts:
             st.info("No headlines found.")
         else:
-            for a in articles:
+            for a in arts:
                 title = a.get("title", "")
-                sentiment = sentiment_label(title)
-                st.markdown(f"- {sentiment}: {title}")
+                lbl = sentiment_label(title)
+                st.markdown(f"- {lbl}: {title}")
 
+# ==============================
+# About Page
+# ==============================
 else:
     st.header("ℹ️ About")
     st.markdown("""
     ### Indian Market Dashboard  
-    **Features:**  
-    - Live NIFTY / SENSEX charts  
-    - Stock search & growth tracking  
-    - Top gainers/losers  
-    - Business news with sentiment analysis  
-    - Professional blue-dark interface  
+    Features:
+    - Live NIFTY / SENSEX performance  
+    - Stock search with growth tracking  
+    - Top gainers & losers  
+    - Business news with sentiment  
+    - Professional green-blue theme  
 
-    *Powered by Streamlit · Data from Yahoo Finance & NewsAPI*
+    Notes:
+    - Some NSE APIs may be blocked; if so, use manual symbol format (e.g., RELIANCE.NS).
+    - Free news APIs often have request limits. Consider backup key for continuity.
     """)
